@@ -7,7 +7,19 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, CheckCircle2, Clock, RefreshCw, Settings2, Users } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  UserX,
+} from "lucide-react";
 import { mockPayload } from "./mockData";
 import type { DailyRecord, DashboardPayload, MonthlyCounter } from "./types";
 
@@ -37,7 +49,12 @@ async function fetchPayload(url: string): Promise<DashboardPayload> {
   if (Array.isArray(data)) {
     return { date: new Date().toISOString().slice(0, 10), records: data, monthly: [] };
   }
-  return data as DashboardPayload;
+  const p = data as Partial<DashboardPayload>;
+  return {
+    date: p.date ?? new Date().toISOString().slice(0, 10),
+    records: p.records ?? [],
+    monthly: p.monthly ?? [],
+  };
 }
 
 const readLS = (k: string) =>
@@ -88,9 +105,11 @@ export function Dashboard() {
   }, [load]);
 
   const todayRecords = payload.records ?? [];
-  const lateToday = todayRecords.filter((r) => r.late && !r.excused).length;
-  const onTimeToday = todayRecords.filter((r) => !r.late || r.excused).length;
-  const missingCheckout = todayRecords.filter((r) => r.checkIn && !r.checkOut).length;
+  const present = todayRecords.filter((r) => !!r.checkIn);
+  const lateToday = present.filter((r) => r.late && !r.excused).length;
+  const onTimeToday = present.filter((r) => !r.late || r.excused).length;
+  const absentToday = todayRecords.filter((r) => !r.checkIn).length;
+  const missingCheckout = present.filter((r) => !r.checkOut).length;
 
   const atRiskOrCritical: MonthlyCounter[] = useMemo(() => {
     return [...(payload.monthly ?? [])]
@@ -100,11 +119,16 @@ export function Dashboard() {
 
   const handleExcuse = async (record: DailyRecord) => {
     setExcusing(record.employeeId);
-    // Optimistic update
+    // Optimistic update: mark daily excused AND decrement monthly late count
     setPayload((p) => ({
       ...p,
       records: p.records.map((r) =>
         r.employeeId === record.employeeId ? { ...r, excused: true } : r,
+      ),
+      monthly: p.monthly.map((m) =>
+        m.employeeId === record.employeeId
+          ? { ...m, lateCount: Math.max(0, m.lateCount - 1) }
+          : m,
       ),
     }));
     try {
@@ -118,9 +142,16 @@ export function Dashboard() {
             action: "excuse",
           }),
         });
+        toast.success(`${record.name} marked excused`);
+      } else {
+        toast.message("Excused locally", {
+          description: "Set an excuse webhook in Connect n8n to persist.",
+        });
       }
-    } catch {
-      // keep optimistic state; user will see refresh result
+    } catch (e) {
+      toast.error("Failed to sync excuse", {
+        description: e instanceof Error ? e.message : "Network error",
+      });
     } finally {
       setExcusing(null);
     }
