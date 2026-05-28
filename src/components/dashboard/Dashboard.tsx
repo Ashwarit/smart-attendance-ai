@@ -7,7 +7,19 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, CheckCircle2, Clock, RefreshCw, Settings2, Users } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  UserX,
+} from "lucide-react";
 import { mockPayload } from "./mockData";
 import type { DailyRecord, DashboardPayload, MonthlyCounter } from "./types";
 
@@ -37,7 +49,12 @@ async function fetchPayload(url: string): Promise<DashboardPayload> {
   if (Array.isArray(data)) {
     return { date: new Date().toISOString().slice(0, 10), records: data, monthly: [] };
   }
-  return data as DashboardPayload;
+  const p = data as Partial<DashboardPayload>;
+  return {
+    date: p.date ?? new Date().toISOString().slice(0, 10),
+    records: p.records ?? [],
+    monthly: p.monthly ?? [],
+  };
 }
 
 const readLS = (k: string) =>
@@ -88,9 +105,11 @@ export function Dashboard() {
   }, [load]);
 
   const todayRecords = payload.records ?? [];
-  const lateToday = todayRecords.filter((r) => r.late && !r.excused).length;
-  const onTimeToday = todayRecords.filter((r) => !r.late || r.excused).length;
-  const missingCheckout = todayRecords.filter((r) => r.checkIn && !r.checkOut).length;
+  const present = todayRecords.filter((r) => !!r.checkIn);
+  const lateToday = present.filter((r) => r.late && !r.excused).length;
+  const onTimeToday = present.filter((r) => !r.late || r.excused).length;
+  const absentToday = todayRecords.filter((r) => !r.checkIn).length;
+  const missingCheckout = present.filter((r) => !r.checkOut).length;
 
   const atRiskOrCritical: MonthlyCounter[] = useMemo(() => {
     return [...(payload.monthly ?? [])]
@@ -100,11 +119,16 @@ export function Dashboard() {
 
   const handleExcuse = async (record: DailyRecord) => {
     setExcusing(record.employeeId);
-    // Optimistic update
+    // Optimistic update: mark daily excused AND decrement monthly late count
     setPayload((p) => ({
       ...p,
       records: p.records.map((r) =>
         r.employeeId === record.employeeId ? { ...r, excused: true } : r,
+      ),
+      monthly: p.monthly.map((m) =>
+        m.employeeId === record.employeeId
+          ? { ...m, lateCount: Math.max(0, m.lateCount - 1) }
+          : m,
       ),
     }));
     try {
@@ -118,9 +142,16 @@ export function Dashboard() {
             action: "excuse",
           }),
         });
+        toast.success(`${record.name} marked excused`);
+      } else {
+        toast.message("Excused locally", {
+          description: "Set an excuse webhook in Connect n8n to persist.",
+        });
       }
-    } catch {
-      // keep optimistic state; user will see refresh result
+    } catch (e) {
+      toast.error("Failed to sync excuse", {
+        description: e instanceof Error ? e.message : "Network error",
+      });
     } finally {
       setExcusing(null);
     }
@@ -138,15 +169,25 @@ export function Dashboard() {
   return (
     <div className="min-h-screen bg-muted/30">
       <header className="border-b bg-background">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">HR Attendance Intelligence</h1>
-            <p className="text-sm text-muted-foreground">
-              Live view · {payload.date} · updated {lastUpdated.toLocaleTimeString()}
-              {usingMock && " · showing sample data"}
-            </p>
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="rounded-md bg-primary/10 p-2 text-primary">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight">HR Attendance Intelligence</h1>
+              <p className="text-xs text-muted-foreground">
+                {payload.date} · updated {lastUpdated.toLocaleTimeString()}
+                {usingMock && " · sample data"}
+                {!usingMock && !error && " · live"}
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
+            <Badge variant={usingMock ? "secondary" : error ? "destructive" : "default"} className="hidden sm:inline-flex">
+              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current" />
+              {usingMock ? "Sample mode" : error ? "Disconnected" : "Live"}
+            </Badge>
             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
               <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               Refresh
@@ -204,49 +245,68 @@ export function Dashboard() {
           </Card>
         )}
 
-        <section className="grid gap-4 md:grid-cols-3">
-          <SummaryCard
-            icon={<Clock className="h-5 w-5" />}
-            label="Late today"
-            value={lateToday}
-            accent="text-destructive"
-            loading={loading && !payload.records.length}
-          />
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <SummaryCard
             icon={<CheckCircle2 className="h-5 w-5" />}
-            label="On time today"
+            label="On time"
             value={onTimeToday}
             accent="text-emerald-600"
-            loading={loading && !payload.records.length}
+            tone="emerald"
+            loading={loading && usingMock}
           />
           <SummaryCard
-            icon={<Users className="h-5 w-5" />}
+            icon={<Clock className="h-5 w-5" />}
+            label="Late"
+            value={lateToday}
+            accent="text-destructive"
+            tone="destructive"
+            loading={loading && usingMock}
+          />
+          <SummaryCard
+            icon={<UserX className="h-5 w-5" />}
+            label="Absent"
+            value={absentToday}
+            accent="text-slate-600"
+            tone="slate"
+            loading={loading && usingMock}
+          />
+          <SummaryCard
+            icon={<AlertTriangle className="h-5 w-5" />}
             label="Missing checkout"
             value={missingCheckout}
             accent="text-amber-600"
-            loading={loading && !payload.records.length}
+            tone="amber"
+            loading={loading && usingMock}
           />
         </section>
 
         <section className="grid gap-6 lg:grid-cols-5">
           <Card className="lg:col-span-3">
-            <CardHeader>
-              <CardTitle className="text-base">At-risk employees this month</CardTitle>
-              <p className="text-xs text-muted-foreground">Employees with 2 or more late arrivals</p>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle className="text-base">At-risk employees this month</CardTitle>
+                <p className="text-xs text-muted-foreground">Three-strike policy · 2+ late arrivals</p>
+              </div>
+              <Badge variant="outline" className="font-mono">
+                {atRiskOrCritical.length}
+              </Badge>
             </CardHeader>
+            <Separator />
             <CardContent>
               {atRiskOrCritical.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  No one is at risk this month. Nice.
-                </p>
+                <div className="flex flex-col items-center gap-2 py-10 text-center">
+                  <ShieldCheck className="h-8 w-8 text-emerald-600" />
+                  <p className="text-sm font-medium">All clear this month</p>
+                  <p className="text-xs text-muted-foreground">No employees with 2+ late arrivals.</p>
+                </div>
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="hover:bg-transparent">
                       <TableHead>Employee</TableHead>
-                      <TableHead>Late count</TableHead>
+                      <TableHead className="text-right">Late count</TableHead>
                       <TableHead>Last warning</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -258,11 +318,11 @@ export function Dashboard() {
                             <div className="font-medium">{m.name}</div>
                             <div className="text-xs text-muted-foreground">{m.employeeId}</div>
                           </TableCell>
-                          <TableCell className="font-mono">{m.lateCount}</TableCell>
+                          <TableCell className="text-right font-mono tabular-nums">{m.lateCount}/3</TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {m.lastWarningDate ?? "—"}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="text-right">
                             <Badge className={statusVariant(s)}>{s}</Badge>
                           </TableCell>
                         </TableRow>
@@ -275,20 +335,27 @@ export function Dashboard() {
           </Card>
 
           <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-base">Today's late arrivals</CardTitle>
-              <p className="text-xs text-muted-foreground">Mark as Excused to remove from the count</p>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle className="text-base">Today's late arrivals</CardTitle>
+                <p className="text-xs text-muted-foreground">Excuse to remove from monthly count</p>
+              </div>
+              <Badge variant="outline" className="font-mono">{lateToday}</Badge>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <Separator />
+            <CardContent className="space-y-2 pt-4">
               {todayRecords.filter((r) => r.late).length === 0 && (
-                <p className="py-6 text-center text-sm text-muted-foreground">No late arrivals today.</p>
+                <div className="flex flex-col items-center gap-2 py-10 text-center">
+                  <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                  <p className="text-sm font-medium">No late arrivals today</p>
+                </div>
               )}
               {todayRecords
                 .filter((r) => r.late)
                 .map((r) => (
                   <div
                     key={r.employeeId}
-                    className="flex items-center justify-between rounded-md border p-3"
+                    className="flex items-center justify-between rounded-md border bg-card p-3 transition-colors hover:bg-muted/50"
                   >
                     <div>
                       <div className="font-medium">{r.name}</div>
@@ -297,7 +364,9 @@ export function Dashboard() {
                       </div>
                     </div>
                     {r.excused ? (
-                      <Badge variant="secondary">Excused</Badge>
+                      <Badge variant="secondary" className="gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Excused
+                      </Badge>
                     ) : (
                       <Button
                         size="sm"
@@ -305,7 +374,7 @@ export function Dashboard() {
                         disabled={excusing === r.employeeId}
                         onClick={() => handleExcuse(r)}
                       >
-                        {excusing === r.employeeId ? "Saving…" : "Mark Excused"}
+                        {excusing === r.employeeId ? "Saving…" : "Excuse"}
                       </Button>
                     )}
                   </div>
@@ -314,8 +383,13 @@ export function Dashboard() {
           </Card>
         </section>
 
-        <footer className="pt-4 text-center text-xs text-muted-foreground">
-          Auto-refreshing every 60 seconds. Three-strike policy: Safe 0–1 · At Risk 2 · Critical 3.
+        <footer className="flex flex-wrap items-center justify-between gap-2 border-t pt-4 text-xs text-muted-foreground">
+          <span>Auto-refreshing every 60 seconds.</span>
+          <span className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-600" /> Safe 0–1</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" /> At Risk 2</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-destructive" /> Critical 3+</span>
+          </span>
         </footer>
       </main>
     </div>
@@ -327,18 +401,26 @@ function SummaryCard({
   label,
   value,
   accent,
+  tone,
   loading,
 }: {
   icon: React.ReactNode;
   label: string;
   value: number;
   accent: string;
+  tone: "emerald" | "destructive" | "amber" | "slate";
   loading: boolean;
 }) {
+  const ring = {
+    emerald: "bg-emerald-50 ring-emerald-100 dark:bg-emerald-950/40 dark:ring-emerald-900",
+    destructive: "bg-destructive/10 ring-destructive/20",
+    amber: "bg-amber-50 ring-amber-100 dark:bg-amber-950/40 dark:ring-amber-900",
+    slate: "bg-slate-100 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700",
+  }[tone];
   return (
-    <Card>
-      <CardContent className="flex items-center gap-4 py-6">
-        <div className={`rounded-md bg-muted p-3 ${accent}`}>{icon}</div>
+    <Card className="transition-shadow hover:shadow-md">
+      <CardContent className="flex items-center gap-4 py-5">
+        <div className={`rounded-lg p-3 ring-1 ${ring} ${accent}`}>{icon}</div>
         <div>
           <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
           {loading ? (
