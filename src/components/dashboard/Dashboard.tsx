@@ -40,9 +40,12 @@ async function fetchPayload(url: string): Promise<DashboardPayload> {
   return data as DashboardPayload;
 }
 
+const readLS = (k: string) =>
+  typeof window === "undefined" ? "" : window.localStorage.getItem(k) ?? "";
+
 export function Dashboard() {
-  const [webhookUrl, setWebhookUrl] = useState<string>(() => localStorage.getItem(WEBHOOK_KEY) ?? "");
-  const [excuseUrl, setExcuseUrl] = useState<string>(() => localStorage.getItem(EXCUSE_KEY) ?? "");
+  const [webhookUrl, setWebhookUrl] = useState<string>(() => readLS(WEBHOOK_KEY));
+  const [excuseUrl, setExcuseUrl] = useState<string>(() => readLS(EXCUSE_KEY));
   const [payload, setPayload] = useState<DashboardPayload>(mockPayload);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,8 +127,10 @@ export function Dashboard() {
   };
 
   const saveSettings = () => {
-    localStorage.setItem(WEBHOOK_KEY, webhookUrl);
-    localStorage.setItem(EXCUSE_KEY, excuseUrl);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(WEBHOOK_KEY, webhookUrl);
+      window.localStorage.setItem(EXCUSE_KEY, excuseUrl);
+    }
     setSettingsOpen(false);
     load();
   };
