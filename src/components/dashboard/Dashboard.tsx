@@ -75,7 +75,7 @@ const STATUS_STYLES: Record<Status, { pill: string; dot: string }> = {
    ======================================== */
 
 async function fetchPayload(url: string): Promise<DashboardPayload> {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Webhook ${res.status}`);
   const data = await res.json();
   if (Array.isArray(data)) {
