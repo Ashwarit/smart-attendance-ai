@@ -81,12 +81,42 @@ async function fetchPayload(url: string): Promise<DashboardPayload> {
   if (Array.isArray(data)) {
     return { date: new Date().toISOString().slice(0, 10), records: data, monthly: [] };
   }
-  const p = data as Partial<DashboardPayload>;
-  return {
-    date: p.date ?? new Date().toISOString().slice(0, 10),
-    records: p.records ?? [],
-    monthly: p.monthly ?? [],
-  };
+  const p = data as Record<string, unknown>;
+  const date = (p.date as string) ?? new Date().toISOString().slice(0, 10);
+
+  // Native shape
+  if (Array.isArray(p.records) || Array.isArray(p.monthly)) {
+    return {
+      date,
+      records: (p.records as DailyRecord[]) ?? [],
+      monthly: (p.monthly as MonthlyCounter[]) ?? [],
+    };
+  }
+
+  // Adapter for { summary, atRisk[], lateDetail[] } shape
+  const lateDetail = (p.lateDetail as Array<Record<string, unknown>>) ?? [];
+  const atRisk = (p.atRisk as Array<Record<string, unknown>>) ?? [];
+  const monthYear = date.slice(0, 7);
+
+  const records: DailyRecord[] = lateDetail.map((r) => ({
+    employeeId: String(r.employeeId ?? r.id ?? r.name ?? ""),
+    name: String(r.name ?? r.employeeId ?? "Unknown"),
+    date: String(r.date ?? date),
+    checkIn: (r.checkIn as string) ?? null,
+    checkOut: (r.checkOut as string) ?? null,
+    late: r.late !== false,
+    excused: Boolean(r.excused),
+  }));
+
+  const monthly: MonthlyCounter[] = atRisk.map((m) => ({
+    employeeId: String(m.employeeId ?? m.id ?? m.name ?? ""),
+    name: String(m.name ?? m.employeeId ?? "Unknown"),
+    lateCount: Number(m.lateCount ?? m.count ?? m.strikes ?? 0),
+    lastWarningDate: (m.lastWarningDate as string) ?? null,
+    monthYear: String(m.monthYear ?? monthYear),
+  }));
+
+  return { date, records, monthly };
 }
 
 const readLS = (k: string) =>
