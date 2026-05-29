@@ -123,6 +123,8 @@ function Avatar({ name, variant = "blue" }: { name: string; variant?: "blue" | "
 export function Dashboard() {
   const [webhookUrl, setWebhookUrl] = useState<string>(() => readLS(WEBHOOK_KEY));
   const [excuseUrl, setExcuseUrl] = useState<string>(() => readLS(EXCUSE_KEY));
+  const [tempWebhookUrl, setTempWebhookUrl] = useState<string>(webhookUrl);
+  const [tempExcuseUrl, setTempExcuseUrl] = useState<string>(excuseUrl);
   const [payload, setPayload] = useState<DashboardPayload>(mockPayload);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +133,14 @@ export function Dashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [excusing, setExcusing] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
+
+  // Sync temporary inputs when the settings dialog opens
+  useEffect(() => {
+    if (settingsOpen) {
+      setTempWebhookUrl(webhookUrl);
+      setTempExcuseUrl(excuseUrl);
+    }
+  }, [settingsOpen, webhookUrl, excuseUrl]);
 
   /* Auto-refresh every 60 seconds (Requirement B1.4) */
   const load = useCallback(async () => {
@@ -150,11 +160,12 @@ export function Dashboard() {
       setLastUpdated(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch");
-      setUsingMock(false);
+      // Fallback to mock payload if no realtime data was ever loaded in the current state
+      setUsingMock((prev) => prev || payload === mockPayload || !payload.records || payload.records.length === 0);
     } finally {
       setLoading(false);
     }
-  }, [webhookUrl]);
+  }, [webhookUrl, payload]);
 
   useEffect(() => {
     load();
@@ -233,11 +244,16 @@ export function Dashboard() {
 
   const saveSettings = () => {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(WEBHOOK_KEY, webhookUrl);
-      window.localStorage.setItem(EXCUSE_KEY, excuseUrl);
+      window.localStorage.setItem(WEBHOOK_KEY, tempWebhookUrl);
+      window.localStorage.setItem(EXCUSE_KEY, tempExcuseUrl);
     }
     setSettingsOpen(false);
-    load();
+    if (webhookUrl === tempWebhookUrl && excuseUrl === tempExcuseUrl) {
+      load(); // Force manual reload since state didn't change
+    } else {
+      setWebhookUrl(tempWebhookUrl);
+      setExcuseUrl(tempExcuseUrl);
+    }
   };
 
   return (
@@ -298,12 +314,12 @@ export function Dashboard() {
                 <div className="space-y-4 pt-1">
                   <div className="space-y-1.5">
                     <Label htmlFor="webhook" className="text-[13px] font-medium text-slate-700">GET — Attendance Data</Label>
-                    <Input id="webhook" placeholder="https://your-n8n/webhook/attendance" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} className="h-9 font-mono text-[13px]" />
+                    <Input id="webhook" placeholder="https://your-n8n/webhook/attendance" value={tempWebhookUrl} onChange={(e) => setTempWebhookUrl(e.target.value)} className="h-9 font-mono text-[13px]" />
                     <p className="text-[11px] text-slate-400">Returns {"{ date, records[], monthly[] }"} — CORS must be enabled.</p>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="excuse" className="text-[13px] font-medium text-slate-700">POST — Excuse Override (optional)</Label>
-                    <Input id="excuse" placeholder="https://your-n8n/webhook/excuse" value={excuseUrl} onChange={(e) => setExcuseUrl(e.target.value)} className="h-9 font-mono text-[13px]" />
+                    <Input id="excuse" placeholder="https://your-n8n/webhook/excuse" value={tempExcuseUrl} onChange={(e) => setTempExcuseUrl(e.target.value)} className="h-9 font-mono text-[13px]" />
                   </div>
                 </div>
                 <DialogFooter className="pt-2">
