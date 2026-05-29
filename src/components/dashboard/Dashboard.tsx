@@ -133,6 +133,8 @@ export function Dashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [excusing, setExcusing] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Sync temporary inputs when the settings dialog opens
   useEffect(() => {
@@ -272,7 +274,10 @@ export function Dashboard() {
                 HR Attendance Intelligence
               </h1>
               <p className="text-[11px] text-slate-500 leading-none mt-0.5 truncate">
-                {payload.date} &middot; {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {payload.date}
+                {mounted && (
+                  <> &middot; {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</>
+                )}
                 {usingMock && (
                   <span className="ml-1.5 rounded bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-600 border border-amber-200/50">
                     Sample
